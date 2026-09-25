@@ -386,6 +386,21 @@ INDEX_VERSION = 17
 #   built on them) and is `G#type` / `Inh#type` (#847); a backticked type or field keeps no backticks
 #   (`` `Weird`#type `` is `Weird#type`, `` Node.`from` `` is `Node.from`), and
 #   an exported backticked field (`` `type`*: string ``), dropped before, is new.
+#
+#   ⚠⚠ **And #844/#846: one reader for a Pascal declared name.** New: a
+#   method body (`function TAudit.RunIt ... begin ... end;`, a `method` of
+#   its class), a generic type (`TBox<T>` is `TBox#class`, parameters in the
+#   signature) and its members, a generic method and a free generic function
+#   (`F<T>`, `Max<T>`), and a helper's members (the helper still `TH#type`).
+#   Ids MOVE for two reasons. SCOPE: a generic type or helper was skipped
+#   but its body walked with the ENCLOSING owner, so what sat there one
+#   scope too high now carries its owner (`C#constant` is `TBox.C#constant`,
+#   `TIn#class` is `TBox.TIn#class`, `TO.P#method` is `TO.TI.P#method`).
+#   ORDINALS: symbols sharing a qualified name and kind are `~1..~N` in
+#   document order, unsuffixed when alone, so every name whose set changed
+#   renumbers: `TAudit.RunIt#method` is `~1` beside its body's `~2`,
+#   `TProc#type` is `~1` beside `TProc<T>`, a twin left alone loses its
+#   suffix, and a `~N` can name a DIFFERENT symbol than before.
 PARSER_GENERATION = 8
 
 

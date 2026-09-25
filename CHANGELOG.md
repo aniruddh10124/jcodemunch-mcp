@@ -15,6 +15,62 @@ so the worktree's index stopped updating for the rest of its life.
 When both probes return the same index, it now resolves to that index.
 Two different indexes matching one path still raise `IdentityModeAmbiguous`.
 
+### Fixed - a Pascal method's body is indexed as a method of its class, and a generic class is indexed at all (#844, #846)
+
+A Delphi unit declares `function RunIt: Integer;` inside `TAudit = class` and
+implements it after `implementation` as `function TAudit.RunIt: Integer;
+begin ... end;`. The declaration was indexed and the body was not, so
+`get_symbol_source` on the method returned one line of signature and none of
+the code. Reported by @jgravelle while measuring #812.
+
+The implementation header names the method with a dotted chain
+(`genericDot`), and `_parse_pascal_symbols` asked for a direct `identifier`
+child, which only a free routine has. Every constructor, destructor,
+procedure, function, class function and class operator body was skipped.
+
+⚠ Review found the same direct-`identifier` check in the parser's other
+readers:
+- A generic type wraps its name in `genericTpl`, so `TBox<T> = class` was
+  absent entirely, along with every member (#846).
+- A generic method declared in a class (`function F<T>: T;`) was absent in
+  the same way.
+- A `class helper for` or `record helper for` type was indexed, but its body
+  was never walked, so its members were missing.
+
+Every reader of a Pascal declared name now goes through one helper, which
+reads a bare name, a generic name without its type parameters, or a dotted
+chain. The type parameters move to the signature (`type TBox<T>`), the way
+C# names `Action<T>`.
+
+The body is now a `method` owned by the type the chain names. That includes a
+nested class (`TOuter.TInner.Deep`), a generic owner (`TBox<T>.Get` is
+`TBox.Get`, owned by `TBox`) and a helper. The declaration and the body share
+a qualified name and kind, the way Objective-C's `@interface` and
+`@implementation` already do, so the shared duplicate-id rule orders them.
+
+New: every body, a generic type and its members, a generic method, a free
+generic function and a helper's members.
+
+⚠ Ids move, for two reasons:
+- **Scope.** The walk skipped a generic type or a helper, then walked its
+  body with the ENCLOSING owner, so whatever it indexed there sat one scope
+  too high and now carries its owner: `C#constant` is `TBox.C#constant`,
+  `TIn#class` is `TBox.TIn#class` (its members follow), `TO.P` is
+  `TO.TI.P`, and the same in a helper (`TH.C`, `TH.TX.A`).
+- **Ordinals.** Symbols that share a qualified name and kind are numbered
+  `~1`, `~2`, ... in document order, and a file with a single one carries no
+  suffix. This fix adds such symbols (a body beside its declaration, `TProc<T>`
+  beside `TProc`, `Max<T>` beside `Max`) and moves others out of a shared
+  name, so any name whose set changed is renumbered. `TAudit.RunIt#method`
+  becomes `~1` with the body `~2`; `TProc#type` becomes `~1`; a twin left
+  alone loses its suffix; and a `~N` id can name a DIFFERENT symbol than
+  before (`TA = class; TA<T> = class; TA = class`: `TA#class~2` was the full
+  `TA` and is `TA<T>`). Only a type's signature tells arity twins apart, and
+  their members differ only by `parent`.
+
+`PARSER_GENERATION` 8, still unreleased, re-parses unchanged Pascal files on
+upgrade.
+
 ### Fixed - a Nim routine is indexed when its name is exported or an operator (#843, #847)
 
 `proc runIt*(a: Audit): int` wasn't indexed at all, in any of the seven
