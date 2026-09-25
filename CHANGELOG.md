@@ -15,6 +15,29 @@ so the worktree's index stopped updating for the rest of its life.
 When both probes return the same index, it now resolves to that index.
 Two different indexes matching one path still raise `IdentityModeAmbiguous`.
 
+### Fixed - a PHP enum case is a symbol of its enum (#759)
+
+`enum Suit { case Hearts; case Spades; }` indexed `Suit` and nothing inside
+it. The grammar spells a case `enum_case`, and no `PHP_SPEC` map named that
+node type. #698's shape: a construct the grammar names and the spec doesn't.
+An enum's cases are usually the only thing it holds. Found while fixing #744.
+
+A case is now a `constant` owned by its enum (`Suit.Hearts`), pure or backed.
+That's the kind the same enum's `const` already had, and the kind Python's
+and AL's enum members have. An index built before this release has no cases
+for unchanged PHP files until they are re-parsed. `PARSER_GENERATION` 8,
+already unreleased, re-parses them on upgrade.
+
+⚠ #759 was also where the family decided whether enum members are indexed at
+all: the Dart and Zig tests deferred to it. The ruling is yes, in every
+language, as an owned `constant`. `tests/test_enum_members_register.py`
+measures where that holds. 30 of the 37 enum-bearing languages still
+publish only the enum, including TypeScript, Java, C#, Rust, Kotlin and
+Swift. They're one tracked row, `docs/workflows/LEDGER.md` L-03, not 30 new
+issues, and the register fails whenever a language moves.
+The Dart variant pin was renamed from "not indexed, and that is a ruling" to a
+tracked gap that fails when Dart's variants arrive.
+
 ### Fixed - the route criterion has one authority, and every normative copy names it (#715)
 
 `STANDARD.md` stated the route bar twice, and the two statements disagreed.
