@@ -15,6 +15,37 @@ so the worktree's index stopped updating for the rest of its life.
 When both probes return the same index, it now resolves to that index.
 Two different indexes matching one path still raise `IdentityModeAmbiguous`.
 
+### Fixed - a Nim routine is indexed when its name is exported or an operator (#843, #847)
+
+`proc runIt*(a: Audit): int` wasn't indexed at all, in any of the seven
+routine kinds. The export marker puts the name under `exported_symbol`, and
+`_parse_nim_symbols` asked each routine for a direct `identifier` child. So on
+a real Nim package the indexed functions were the private ones, and the public
+API was missing. Reported by @jgravelle while measuring #812.
+
+The probe found a second wrapper on the same field. An operator's name is
+`accent_quoted` (``proc `$`(a: V): string``), so a plain operator was skipped
+too, and an exported operator nests one wrapper inside the other. An operator
+is now named without its backticks (`$`, `+`), which is what a caller
+searches for.
+
+⚠ Review found the same rule spelled differently in the other two readers of
+a Nim name, which the first draft had called correct:
+- #812's object-field reader unwrapped the marker but dropped an exported
+  backticked field (`` `type`*: string ``), and kept the backticks on a plain
+  one (`` Node.`from` ``).
+- The type section read the declaration's text, so a generic type published
+  as `G*[T]`, and its fields as `G*[T].a`. A type with a pragma carried the
+  pragma the same way: `Inh {.inheritable.}`, and `Inh {.inheritable.}.v`
+  for its field (#847).
+
+All three now read the `name` field through one helper, `_declared_name`.
+Three kinds of id move as a result: `G*[T]` is `G`, `Inh {.inheritable.}` is
+`Inh`, and a backticked name loses its backticks. A search for `Inh` by exact
+name found nothing before.
+`PARSER_GENERATION` 8, already unreleased, re-parses unchanged Nim files on
+upgrade.
+
 ### Fixed - a PHP enum case is a symbol of its enum (#759)
 
 `enum Suit { case Hearts; case Spades; }` indexed `Suit` and nothing inside
