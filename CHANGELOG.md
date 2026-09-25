@@ -15,6 +15,45 @@ so the worktree's index stopped updating for the rest of its life.
 When both probes return the same index, it now resolves to that index.
 Two different indexes matching one path still raise `IdentityModeAmbiguous`.
 
+### Fixed - the route criterion has one authority, and every normative copy names it (#715)
+
+`STANDARD.md` stated the route bar twice, and the two statements disagreed.
+Section 4's Floor line carried the 2026-09-03 correction (FINDINGS F-02): the
+gate is route@1 on the held-out CONTROL subset of `holdout.json`, floor and
+target in `harness/thresholds.json` under `route.control_at1`, and "route@1
+>= 60%" was never a gate. The Definition of Regression, item 7, still read
+"Route@1 on the human corpus falls below 60%". That's a different corpus and
+a different number, so a reviewer reading one section blocked a result the
+other section passed. F-02's fix reached the paragraph that was reported and
+not the second site: Standing lesson 08-19, inside the document that states
+it. Found by an external critique of 1.108.319.
+
+The same retired bar reached contributors. `CONTRIBUTING.md` gave the
+moratorium's exit condition as 60% on the visible `queries.json` and a name
+leakage ceiling of 0.15, and said both were enforced by
+`tests/test_catalog_moratorium.py`. The test gates neither: it reads the
+control subset against `route.control_at1` and holds leakage at its own
+`EXIT_MAX_NAME_LEAKAGE`. Both sites now name those two authorities and
+restate no number. Section 4's "Current:" line keeps its 71.2% measurement
+and no longer calls 60% a bar.
+
+⚠⚠ `tests/test_route_criterion_has_one_authority.py` checks the property over
+every tracked Markdown file, not the two reported lines. A sentence that gives
+route@1 a bar with a percentage must name `route.control_at1`, or quote only
+that entry's floor or target with the control subset named as route@1's
+corpus. A right number on the wrong corpus fails too, and so does a leakage
+ceiling other than the test's. Naming the id doesn't license the number
+beside it: review round 2 found `docs/harness/DESIGN.md` still listing
+`route.control_at1>=55` as the floor, and it now reads `>=40` with the
+target beside it. The unit is the sentence, and a `Label:` line
+starts a new one. Review round 1 found the first draft scanned paragraphs:
+section 4's Current, Floor and Target lines are one paragraph, so the Floor
+line's id exempted the retired bar put back on the Current line. Dated records
+keep their numbers, each with its reason in the test: CHANGELOG,
+ISSUE-HISTORY, the harness ledgers and surveys, and FINDINGS. ROADMAP is
+scanned except its moratorium section, which keeps the 2026-08 conditions
+beside the note that names the gate.
+
 ### Fixed - `get_changed_symbols` keeps blast radius's verdict, so an empty blast is no longer "no impact" (#718)
 
 `get_changed_symbols(include_blast_radius=True)` answered every changed
