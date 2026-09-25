@@ -295,3 +295,65 @@ async def test_watcher_reindex_passes_store_to_identity_resolver(tmp_path, monke
 
     with pytest.raises(RuntimeError, match="stop after repo-id resolution"):
         await manager._do_reindex(str(project))
+
+
+def test_linked_worktree_local_index_is_not_ambiguous_with_itself(tmp_path):
+    """A worktree indexed in git mode must re-resolve to its own index.
+
+    Git mode keys a linked worktree as ``local/<name>-<hash>`` (#372) and
+    records its ``git_root``. On the next resolve the local probe and the
+    git-root probe both find that one index, which used to raise
+    ``IdentityModeAmbiguous`` ("Both local and git identity indexes already
+    match this path") on every re-index after the first.
+    """
+    from jcodemunch_mcp.tools.index_folder import index_folder
+
+    repo = tmp_path / "kibana"
+    repo.mkdir()
+    _git("init", cwd=repo)
+    _git("config", "user.email", "t@example.com", cwd=repo)
+    _git("config", "user.name", "t", cwd=repo)
+    _set_origin(repo, "https://github.com/elastic/kibana.git")
+    (repo / "main.py").write_text("def hello(): pass\n", encoding="utf-8")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-m", "init", cwd=repo)
+    worktree = repo / ".claude" / "worktrees" / "feature"
+    _git("worktree", "add", "-b", "feature", str(worktree), cwd=repo)
+
+    store_path = tmp_path / "store"
+    main = index_folder(
+        str(repo),
+        use_ai_summaries=False,
+        storage_path=str(store_path),
+        context_providers=False,
+        identity_mode="git",
+    )
+    assert main["success"] is True
+    assert main["repo"] == "elastic/kibana"
+
+    first = index_folder(
+        str(worktree),
+        use_ai_summaries=False,
+        storage_path=str(store_path),
+        context_providers=False,
+        identity_mode="git",
+    )
+    assert first["success"] is True
+    assert first["repo"].startswith("local/feature-")
+
+    decision = git_root.resolve_index_identity(
+        str(worktree),
+        mode="config",
+        store=IndexStore(base_path=str(store_path)),
+    )
+
+    assert f"{decision.owner}/{decision.name}" == first["repo"]
+
+    second = index_folder(
+        str(worktree),
+        use_ai_summaries=False,
+        storage_path=str(store_path),
+        context_providers=False,
+    )
+    assert second["success"] is True, second.get("error")
+    assert second["repo"] == first["repo"]

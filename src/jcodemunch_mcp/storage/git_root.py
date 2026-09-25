@@ -177,6 +177,10 @@ def resolve_index_identity(
     existing_git = _existing_git_identity(folder_path, store) if should_probe_git_identity else None
 
     if local_existing is not None and existing_git is not None:
+        if (existing_git.owner, existing_git.name) == (local_existing.owner, local_existing.name):
+            # One index found by both probes, not two: git mode keys a linked
+            # worktree as local/<name>-<hash> (#372) and records its git_root.
+            return existing_git
         raise IdentityModeAmbiguous(
             "Both local and git identity indexes already match this path. "
             "Invalidate one of them before indexing or resolving this path."

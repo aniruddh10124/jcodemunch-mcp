@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Fixed - Re-indexing a linked worktree no longer fails as "ambiguous" against its own index
+
+A linked worktree indexed in git mode is keyed `local/<name>-<hash>` (#372)
+and records its `git_root`. On the next resolve, the local-identity probe and
+the git-root probe both found that same index, and `resolve_index_identity`
+raised `IdentityModeAmbiguous` ("Both local and git identity indexes already
+match this path"). `watch-claude` hit this on the first edit after every new
+worktree's initial index, and every re-index after that failed the same way,
+so the worktree's index stopped updating for the rest of its life.
+
+When both probes return the same index, it now resolves to that index.
+Two different indexes matching one path still raise `IdentityModeAmbiguous`.
+
 ### Fixed - `get_changed_symbols` keeps blast radius's verdict, so an empty blast is no longer "no impact" (#718)
 
 `get_changed_symbols(include_blast_radius=True)` answered every changed
