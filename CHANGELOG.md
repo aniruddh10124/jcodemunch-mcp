@@ -15,6 +15,47 @@ so the worktree's index stopped updating for the rest of its life.
 When both probes return the same index, it now resolves to that index.
 Two different indexes matching one path still raise `IdentityModeAmbiguous`.
 
+### Fixed - a Kotlin accessor on its own line owns what its body declares (#858)
+
+`val g: Any` with `get() = object { val gg = 1; fun h() = 2 }` on the next
+line published `gg` as a `property` and `h` as a `function`, both with no
+owner. A local function in such a getter's body (`get() { fun loc() = ...;
+return loc() }`) was a fabricated top-level `function`, and so were the
+members of an object literal in a `when` branch or in a setter. In a class
+the same members were filed under the class: `C.gg`, and an object literal's
+`fun` became a method of the class. With the accessor on the property's line
+every one of them was owned by the property. Reported by @jgravelle from the
+#807 review.
+
+tree-sitter-kotlin spills an accessor written on its own line into a sibling
+of the property declaration. #807 reads that sibling for the property's kind;
+ownership was a separate walk and never saw it, so the body was walked with
+the enclosing owner.
+
+The walk now adopts a spilled getter or setter as the property's own child
+(the same test #807 uses to find it, shared rather than repeated), with any
+comments and annotations between them. A `by` delegate on its own line spills
+the same way (`val vm: VM` / `by lazy { object { ... } }`) and is adopted
+under #807's gate, which allows no initializer and no `;` before it. In a
+class body the grammar also ends the class at an own-line delegate, so the
+members after it are still filed at file scope, as on main (LEDGER L-33).
+Only a Kotlin file or class body does this bookkeeping. It costs a Kotlin file
+with no spilled accessor about 5% of `parse_file` (a synthetic 3,000-class file:
+466.5 to 478.2 ms on main, 491.4 to 495.3 ms here), one where every class has an
+own-line getter about 20% (345.7 to 359.9 ms, 421.3 to 430.9 ms), and a Python
+file about 2% from the per-node language test (`server.py`: 245.8 and 249.0 ms,
+249.8 to 252.0 ms). The split form answers exactly what
+the one-line form answers: owner, qualified name, kind and span. On four
+Kotlin projects (1,098 files) the one id that moves is the defect on real
+code, okio's `FakeFileSystem.now#method`, a method of the object literal
+`clock` returns, which becomes `FakeFileSystem.clock.now#function`.
+
+⚠ Spans widen: a property with an own-line accessor now covers it, as the
+one-line form's always has. On the same corpus that is 203 symbols (128
+properties, 69 variables, 6 constants), none narrowed and no start moved. `PARSER_GENERATION` 8, still unreleased,
+re-parses unchanged files. The constant channel owns nothing in either form
+(`val MAX: Any get() = object { val gg = 1 }`), which is LEDGER L-32.
+
 ### Fixed - an F# non-`rec` `let ... and ...` chain binds every name (#856)
 
 `let a = 1 / and b = 2` indexed `a` and not `b`. In a type body it was
