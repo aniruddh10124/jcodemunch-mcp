@@ -15,6 +15,46 @@ so the worktree's index stopped updating for the rest of its life.
 When both probes return the same index, it now resolves to that index.
 Two different indexes matching one path still raise `IdentityModeAmbiguous`.
 
+### Fixed - a C-family prototype list binds every name it declares (#852)
+
+`int f(int), g(int);` gave `function f` and no `g`, in C, C++ and Arduino
+alike. Both names are declared. Reported by @jgravelle, measured while fixing
+#835.
+
+A declaration yields one symbol, named by one declarator. #823 fixed the same
+shape for `typedef int A, B;` with an extra-names step gated on the typedef
+node, so a declaration with several function declarators still yielded one.
+It was #817's mechanism in its fourth C-family spelling, after Go, a typedef
+list and a JS/TS `let` list.
+
+The step now covers a declaration too, in all three C-family specs at once.
+Each declarator that is itself a bare prototype binds a function, with the
+declaration's bytes, #823's recorded choice for a typedef list. `int f(int),
+x;` stays `f` alone, as a lone `int x;` emits nothing, and a C++ overload pair
+(`int f(int), f(double);`) is two ordinal twins (C keeps one per name, #835).
+A declaration the grammar could not parse keeps its old answer.
+
+⚠ In C++ a constructor call is spelled exactly like a prototype list:
+`JsonString a(s1), b(s2);` parses as `T f(U), g(V);`. On real code that shape
+is common and a real prototype list is not, so in C++, Arduino and any `.h`
+a later declarator with a parameter that is a type name with no declared
+parameter name and nothing an expression cannot hold (`(s1)`, `(Foo)`,
+`(inputs[j])`, and with a default value or a bare `...`, `(y = 3)`, `(y...)`)
+binds nothing extra, whether or not a `*` or `&` wraps the declarator
+(`char *p(buf), *q(buf2);`). `int f(int), h(Foo);` therefore gives
+`f` alone there, recorded as LEDGER L-25 with the other shapes it costs. A
+pointer, a reference, an empty `[]`, a qualifier or a `struct`/`enum` type
+cannot come from an expression at any depth, nor can `auto` or `decltype`,
+so `h(Foo (*)(int))` binds. A
+`.c` file, which has no constructor call, binds every prototype; a `.h` keeps
+the rule, since it may be C++ that the C grammar parsed better. Over 1,124 C, C++ and Arduino files from
+eight projects no id appears, moves or leaves; before that rule, 4 ids
+appeared, every one a constructor call.
+
+⚠ New ids only, where the shape occurs: `g#function` beside `f#function`, and
+an overload pair renumbers its ordinals. `PARSER_GENERATION` 8, still
+unreleased, re-parses unchanged files.
+
 ### Fixed - a C++ local function-pointer or lambda variable is not a file-scope function (#850)
 
 `void vf() { int (*fp)(int); }` gave `function fp`, at file scope with no
