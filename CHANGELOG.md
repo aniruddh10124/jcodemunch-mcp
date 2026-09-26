@@ -15,6 +15,42 @@ so the worktree's index stopped updating for the rest of its life.
 When both probes return the same index, it now resolves to that index.
 Two different indexes matching one path still raise `IdentityModeAmbiguous`.
 
+### Fixed - F# abstract members, interface implementations and secondary constructors are indexed (#845, F# half)
+
+An F# interface type, `type IShape = abstract Area : float`, indexed as an
+empty type, and in its other spelling, `type I = interface ... end`, as
+nothing at all, not even its name. A class's `abstract` slots, the members of
+an `interface ... with` block, a `new()` constructor, a `struct ... end` body
+and a `delegate of` type were absent too. Reported by @jgravelle while
+probing #812.
+
+#812's member walk read the member forms it named, and these three sit under
+other nodes: an abstract slot is `abstract + member_signature`, an interface
+implementation is an `interface_implementation` beside the members, and a
+constructor is `additional_constr_defn`. The parser's list of type forms
+also lacked `interface_type_defn` and `delegate_type_defn`, and a
+`struct ... end` or `interface ... end` body holds its members directly,
+outside the node the walk looked in. One reader, `_member_defn`, now serves
+the type body, a `... end` body and an `interface ... with` block alike.
+
+An abstract member with an argument list is a `method` and one without is a
+`property`, #812's rule for concrete members, unless it has an accessor:
+`abstract Item : int -> string with get` is an indexer, a `property`, like its
+`default ... with get(i)`. An interface implementation's
+members are owned by the enclosing type. A constructor is a `method` named
+after its type (`C.C`), as C#, Java and PowerShell constructors index.
+
+⚠ The old walk emitted nothing from any of these forms, so no id moves by
+scope. Ids move by **ordinals**: a concrete member that now shares its
+qualified name and kind with an abstract slot or an interface member
+renumbers `~1..~N` in document order. `abstract Name` with
+`default this.Name` makes `C.Name#property` into `~1` and `~2`, and a class's
+own `Dispose()` beside `IDisposable.Dispose` does the same. One span moves
+without its id: a type joined by `and` to a delegate or an `interface ... end`
+type now spans its own definition rather than the whole `type ... and ...`
+statement, #837's rule for a chain. `PARSER_GENERATION` 8, still unreleased,
+re-parses unchanged F# files on upgrade.
+
 ### Fixed - a Pascal interface's members are indexed (#845, Pascal half)
 
 `IFoo = interface procedure Bar; property Q: Integer read GetQ; end;` gave
