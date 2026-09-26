@@ -2348,7 +2348,19 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
     
     field_name = spec.name_fields[node.type]
     name_node = node.child_by_field_name(field_name)
-    
+    if (
+        node.type == "declaration"
+        and spec.ts_language in _C_FAMILY_TYPEDEF_LANGUAGES
+        and field_name == "declarator"
+    ):
+        # #850: named by the prototype exactly when the gate took it for one
+        # (`_later_prototype`: a variable first, a bare prototype later, a
+        # clean parse), so `void (*hp)(int), helper(int);` is `helper`.
+        # Otherwise its first, which keeps #755's `int (*gfp)(int);` and never
+        # renames a shape only error recovery produces.
+        if name_node is not None and _later_prototype(node):
+            name_node = _c_family_function_declarator(node) or name_node
+
     if name_node:
         if spec.ts_language in ("cpp", "arduino"):
             return _extract_cpp_name(name_node, source_bytes)
@@ -2619,16 +2631,43 @@ def _is_c_family_function_declaration(node, language: str) -> bool:
     binds the name must be a `function_declarator`, so `struct S *make(void);`
     is a prototype and `int (*fp)(int);` is a variable. ⚠ C++ keeps its
     older SUBTREE rule for a file-scope `declaration` (any function
-    declarator anywhere under it), which is why `int (*fp)(int);` is a
-    `function` there (#850); changing that moves C++ ids and is that
-    issue's, not this one's.
+    declarator under its first declarator), which is why `int (*fp)(int);`
+    is a `function` there (#755). #850 narrowed it at block scope and out of
+    lambdas; see `_is_cpp_function_declaration`.
     """
     if language == "c":
         if node.type != "declaration":
             return True
+        # #850: the first declarator, or a later prototype after a variable
+        # (`void (*hp)(int), helper(int);` declares `helper`), as C++ asks.
         declarator = node.child_by_field_name("declarator")
-        return declarator is not None and _cpp_declarator_is_function(declarator)
+        return (declarator is not None and _cpp_declarator_is_function(declarator)) or _later_prototype(node)
     return _is_cpp_function_declaration(node)
+
+
+def _c_family_function_declarator(node):
+    """The first declarator of `node` that declares a function, or None (#850).
+
+    Asked per declarator, so `void (*hp)(int), helper(int);` answers `helper`
+    in either order; both the gate and the name read this, so the declaration
+    is kept for the declarator that names it.
+    """
+    for declarator in node.children_by_field_name("declarator"):
+        if _cpp_declarator_is_function(declarator):
+            return declarator
+    return None
+
+
+def _in_block_scope(node) -> bool:
+    """Is a C-family `declaration` inside a function body (#850)?"""
+    parent = node.parent
+    while parent is not None:
+        if parent.type == "compound_statement":
+            return True
+        if parent.type in ("translation_unit", "declaration_list", "field_declaration_list"):
+            return False
+        parent = parent.parent
+    return False
 
 
 def _is_cpp_function_declaration(node) -> bool:
@@ -2648,7 +2687,76 @@ def _is_cpp_function_declaration(node) -> bool:
         # has no channel in C++, so re-grading `int (*gfp)(int);` there would
         # trade a wrong kind for an absence.
         return _cpp_declarator_is_function(declarator)
-    return _has_function_declarator(declarator)
+    # ⚠⚠ #850, three changes to #755's subtree rule and nothing else:
+    # - the walk never enters a `lambda_expression`: the Arduino grammar
+    #   spells a lambda's parameter list `abstract_function_declarator`, so
+    #   `auto l = [](int a) {...};` was a function at any scope;
+    # - at BLOCK scope a variable emits nothing whatever its shape, as a local
+    #   `int x` does, so a first declarator whose name is certainly bound by a
+    #   pointer, reference or array (`int (*fp)(int);`) does not
+    #   count; #833's prototype exemption had published it at file scope.
+    # - a later declarator counts when it is a bare prototype, at any scope
+    #   and as C asks it (`void (*hp)(int), helper(int);`, `int x, y(int);`).
+    # A shape only error recovery produces keeps the old answer: UNKNOWN is not
+    # a variable. File scope keeps `int (*gfp)(int);` a `function` (#755).
+    declarators = node.children_by_field_name("declarator")
+    first = declarators[0]
+    if _declarator_subtree_has_function(first) and not (
+        _in_block_scope(node) and _declarator_binds_variable(first)
+    ):
+        return True
+    # A later bare prototype counts at any scope, the question C asks too
+    # (#835: one gate, identical bytes, identical answers).
+    return _later_prototype(node)
+
+
+def _later_prototype(node) -> bool:
+    """A declaration whose FIRST declarator certainly binds a variable and a
+    later one is a bare prototype: `int x, y(int);` declares `y` (#850).
+    ⚠ Only when the first is certain and the declaration parsed cleanly:
+    error recovery turns a constructor's member-initialiser list
+    (`: a_(a), b_(b) {}`) and an Objective-C message into exactly this shape."""
+    declarators = node.children_by_field_name("declarator")
+    return (
+        len(declarators) > 1
+        and not node.has_error
+        and _declarator_binds_variable(declarators[0])
+        and any(_cpp_declarator_is_function(d) for d in declarators[1:])
+    )
+
+
+def _declarator_subtree_has_function(node) -> bool:
+    """A function declarator anywhere under `node`, never inside a lambda
+    (#850)."""
+    if node.type in {"function_declarator", "abstract_function_declarator"}:
+        return True
+    if node.type == "lambda_expression":
+        return False
+    return any(c.is_named and _declarator_subtree_has_function(c) for c in node.children)
+
+
+#: Identifier node types a declarator binds as a plain name.
+_CPP_PLAIN_NAME_TYPES = frozenset({"identifier", "field_identifier"})
+
+
+def _declarator_binds_variable(declarator) -> bool:
+    """Is the name `declarator` binds certainly a variable (#850)? The
+    innermost operator decides, as C reads it: `(*fp)(int)` is a pointer,
+    `(*make(int))(int)` a function. False for a shape it cannot read."""
+    bound = declarator
+    if bound.type == "init_declarator":
+        bound = bound.child_by_field_name("declarator") or bound
+    leaf = _cpp_declarator_leaf(bound)
+    parent = leaf.parent
+    if parent is None or parent.type == "function_declarator":
+        return False
+    if parent.type in ("pointer_declarator", "reference_declarator", "array_declarator"):
+        return True
+    if parent.type == "parenthesized_declarator":
+        # `(*fp)` parenthesises a pointer and is caught above; a bare `(x)`
+        # is also how the grammar reads a call (`a_(a)`), so it is UNKNOWN.
+        return False
+    return leaf.type in _CPP_PLAIN_NAME_TYPES and parent.type in ("declaration", "init_declarator")
 
 
 def _cpp_declarator_is_function(declarator) -> bool:
@@ -2689,17 +2797,6 @@ def _cpp_declarator_leaf(declarator):
             break
         node = inner
     return node
-
-
-def _has_function_declarator(node) -> bool:
-    """Check subtree for function declarator nodes."""
-    if node.type in {"function_declarator", "abstract_function_declarator"}:
-        return True
-
-    for child in node.children:
-        if child.is_named and _has_function_declarator(child):
-            return True
-    return False
 
 
 def _extract_cpp_namespace_name(node, source_bytes: bytes) -> Optional[str]:

@@ -435,6 +435,20 @@ INDEX_VERSION = 17
 #   under the new grammar, and a type's access modifier left its name
 #   (`internal X#type` is `X#type`). ORDINALS renumber wherever a name's
 #   set changed.
+#
+#   ⚠⚠ **And #850: a C-family variable with a function-shaped declarator
+#   or a lambda initializer is not a function.** LEAVE: a block-scope
+#   `fp#function` or `l#function` (a local emits nothing), and, in C++ and
+#   Arduino, any variable initialised with a lambda holding a function
+#   declarator (Arduino: every lambda), at any scope. RENAME: a declaration
+#   naming a variable then a prototype is the prototype (`void (*ga)(int),
+#   gb(int);` in C++ and Arduino: `ga#function` is `gb#function`, and
+#   `N.ga` is `N.gb` in a namespace). NEW: anywhere outside a class body
+#   (file, namespace, `extern "C"`, template and block scope), in C, C++ and
+#   Arduino alike, `int x, y(int);` gives
+#   `y#function` and `void (*ga)(int), gb(int);` in C gives `gb#function`,
+#   where all three gave nothing. ORDINALS renumber wherever a
+#   name's set changed. A file-scope `int (*gfp)(int);` stays (#755).
 PARSER_GENERATION = 8
 
 

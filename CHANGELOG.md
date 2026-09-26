@@ -15,6 +15,45 @@ so the worktree's index stopped updating for the rest of its life.
 When both probes return the same index, it now resolves to that index.
 Two different indexes matching one path still raise `IdentityModeAmbiguous`.
 
+### Fixed - a C++ local function-pointer or lambda variable is not a file-scope function (#850)
+
+`void vf() { int (*fp)(int); }` gave `function fp`, at file scope with no
+owner, in C++ and Arduino, and on Arduino `void lf() { auto l = [](int a)
+{ return a; }; }` gave `function l` the same way. Neither is a function.
+Reported by @jgravelle from the #833 review's probes.
+
+The prototype gate asked whether a function declarator appeared anywhere
+under a declaration's first declarator. Two things answered yes when they
+should not. The walk went into lambdas. The Arduino grammar spells every
+lambda's parameter list as a function declarator, so any Arduino declaration
+initialised with a lambda was a function, at any scope (`auto gl = [](int a)
+{...};`); in C++ the same happened when the lambda held a function pointer or
+a prototype (`auto g = [](int (*cb)(int)) {...};`). And at block scope the
+rule took a local function-pointer variable for a prototype; #833 publishes
+a block-scope prototype at file scope, because a real one declares a
+namespace-scope function, so the variable went there too. Arrays of function
+pointers and function references took the same path.
+
+The gate now never reads inside a lambda. At block scope a declarator whose
+name is certainly bound by a pointer, reference or array is a variable and
+emits nothing, as a local `int x` does. A declaration whose first
+declarator is certainly a variable and whose later one is a bare prototype
+is that prototype anywhere outside a class body (file, namespace, `extern "C"`,
+template and block scope), in C, C++ and Arduino alike:
+`int x, y(int);` is `y`, and `void (*ga)(int), gb(int);` is `gb`. A shape only error recovery produces keeps the old answer. A
+file-scope `int (*gfp)(int);` stays a `function`, #755's recorded choice
+over an absence.
+
+⚠ Over 702 C, C++ and Arduino files from six projects, 2 files differ and
+4 wrong `function` rows are gone, every one a local variable except a
+function-pointer `typedef` in a class body the grammar misread as a function
+body; no id appears or moves there. The multi-declarator shapes above did
+not occur in that corpus. Where they do, a C++ or Arduino declaration's id
+renames to the prototype (`ga` to `gb`), and a declaration that emitted
+nothing in any of the three languages (`int x, y(int);`) gains one. A name that
+shared its set with a removed row renumbers its ordinals. `PARSER_GENERATION`
+8, still unreleased, re-parses unchanged files.
+
 ### Fixed - F# is parsed by a grammar that can read it (#848)
 
 In an F# type, every member written after a `static member val ... with
