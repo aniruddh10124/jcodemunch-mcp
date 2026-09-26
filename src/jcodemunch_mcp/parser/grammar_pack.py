@@ -14,7 +14,8 @@ checked). The two generations differ in KIND, not in version number:
   the 2026-09-11 probe found all three are parsed by our OWN regex extractors
   and never ask tree-sitter for a grammar, so nim is the one language 1.x
   loses. 1.17.0's config has a `cache_dir` override and no offline switch.
-- `absent`: no pack at all; nothing parses.
+- `absent`: no pack at all; nothing parses but the `STANDALONE_GRAMMARS`
+  languages, which bring their own wheel (#848: F#).
 
 ⚠ The extractor swallowed every grammar failure as `[]` ("indexed for text
 search only"), so on a `download` pack an unavailable grammar, and on an
@@ -98,13 +99,42 @@ def get_parser(name: str):
     anywhere else under `src/`. Re-raises unchanged, so every caller's own
     handling is what it was.
     """
-    from tree_sitter_language_pack import get_parser as _real  # type: ignore
-
     try:
+        if name in STANDALONE_GRAMMARS:
+            return _standalone_parser(name)
+        from tree_sitter_language_pack import get_parser as _real  # type: ignore
+
         return _real(name)
     except Exception as exc:
         record_failure(name, exc)
         raise
+
+
+# Languages parsed by their own pinned wheel instead of the pack (#848).
+# name -> (distribution, module). ⚠ The pack's newest 0.x F# grammar spills
+# every member after `static member val ... with get, set` out of the type
+# body; the fixed grammar ships only in the 1.x download generation the pin
+# refuses. The wheel compiles its grammar in, so parsing stays local. Its
+# version is part of the capability certificate (`evidence/capability.py`),
+# and moving its pin moves F# ids: a PARSER_GENERATION event, never a bump.
+STANDALONE_GRAMMARS: dict[str, tuple[str, str]] = {
+    "fsharp": ("tree-sitter-fsharp", "tree_sitter_fsharp"),
+}
+
+_standalone_languages: dict[str, object] = {}
+
+
+def _standalone_parser(name: str):
+    import importlib
+
+    from tree_sitter import Language, Parser
+
+    lang = _standalone_languages.get(name)
+    if lang is None:
+        module = importlib.import_module(STANDALONE_GRAMMARS[name][1])
+        lang = Language(module.language())
+        _standalone_languages[name] = lang
+    return Parser(lang)
 
 
 def record_failure(language: str, exc: BaseException) -> None:
@@ -159,7 +189,11 @@ def warnings_for(block: dict) -> list[str]:
             "Airgapped installs parse nothing on it; the shipped pin is <1.0.0 (README, Security section)."
         )
     elif gen == "absent":
-        out.append(f"{PACKAGE} is absent from this install: no file is parsed for symbols.")
+        own = ", ".join(sorted(STANDALONE_GRAMMARS))
+        out.append(
+            f"{PACKAGE} is absent from this install: no file is parsed for symbols "
+            f"except {own}, which ships its own grammar."
+        )
     failed = block.get("grammar_failures") or {}
     if failed:
         names = ", ".join(sorted(failed))
