@@ -401,6 +401,17 @@ INDEX_VERSION = 17
 #   renumbers: `TAudit.RunIt#method` is `~1` beside its body's `~2`,
 #   `TProc#type` is `~1` beside `TProc<T>`, a twin left alone loses its
 #   suffix, and a `~N` can name a DIFFERENT symbol than before.
+#
+#   ⚠⚠ **And #845 (Pascal): an interface's members are indexed.** `declIntf`
+#   is walked, so `IFoo.Bar#method` and `IFoo.Q#property` are new. The
+#   interface stays `IFoo#type`. Ids MOVE by the same two causes. SCOPE:
+#   the unentered body was walked with the ENCLOSING owner, so whatever it
+#   emitted moves into the interface (nested in a type, its members:
+#   `TOuter.Foo` is `TOuter.IInner.Foo`; with no owner, a grammar-only
+#   `const` or type: `K#constant` is `IFoo.K#constant`). ORDINALS: a name
+#   whose twins changed renumbers (a twin left alone loses its suffix; a
+#   grammar-only `procedure IFoo.Bar` body is `~2`). A top-level interface
+#   of routines and properties moves nothing.
 PARSER_GENERATION = 8
 
 

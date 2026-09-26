@@ -15,6 +15,35 @@ so the worktree's index stopped updating for the rest of its life.
 When both probes return the same index, it now resolves to that index.
 Two different indexes matching one path still raise `IdentityModeAmbiguous`.
 
+### Fixed - a Pascal interface's members are indexed (#845, Pascal half)
+
+`IFoo = interface procedure Bar; property Q: Integer read GetQ; end;` gave
+`type IFoo` and nothing in it, so an interface's methods and properties could
+not be found. Reported by @jgravelle while probing #812.
+
+#812 gave the parser a body walk for the containers it names (`declClass`,
+`declRecord`, and `declHelper` since #844). The grammar spells an interface
+body `declIntf`, so it was never entered. A grammar node the parser never
+names reads as the language having no such thing.
+
+An interface's `procedure`/`function` is now a `method` and its `property` a
+`property`, owned by the interface, including a generic interface
+(`IGen<T>`) and a `dispinterface`. The interface keeps its kind, `type`.
+
+⚠ Ids move for the two reasons #844 named. **Scope:** the walk did not enter
+an interface body but walked it with the ENCLOSING owner, so whatever it
+emitted from inside now moves into the interface. Nested in a type, that is
+the interface's members, which were that type's own (`TOuter.Foo#method` is
+now `TOuter.IInner.Foo#method`). Anything emitted with no owner moves too,
+such as a `const` or a type declared in an interface, which the grammar
+accepts and Delphi does not (`K#constant` is `IFoo.K#constant`).
+**Ordinals:** a name whose set of twins changed renumbers `~1..~N`, so a
+`~N` can name a different symbol and a twin left alone loses its suffix;
+`procedure IFoo.Bar` in an implementation section (also grammar-only)
+becomes `~2` beside the declaration. A top-level interface holding only
+routines and properties, which is every valid one, moves nothing. The
+F# half of #845 is a separate parser and a separate change.
+
 ### Fixed - a Pascal method's body is indexed as a method of its class, and a generic class is indexed at all (#844, #846)
 
 A Delphi unit declares `function RunIt: Integer;` inside `TAudit = class` and
